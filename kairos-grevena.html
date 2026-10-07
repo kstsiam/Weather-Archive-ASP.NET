@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Καιρικό Αρχείο Γρεβενών</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Commissioner:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: χάρτης αριστερά (σταθερός), πάνελ ανάλυσης δεξιά· σε κινητό στοιβάζονται */
+:root{
+  --bg:#eef2f0; --panel:#ffffff; --fg:#17211d; --muted:#5b6a63; --line:#d6dfda; --accent:#1d5c7a;
+  --tmax:#c4513a; --tmin:#2f69b0; --tmean:#6d7b74; --rain:#2a8c99; --snow:#7d70bd; --wind:#a87a22; --gust:#d1a24a; --rad:#cf931c; --et0:#4b8638;
+  --display:"Commissioner",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111816; --panel:#18211e; --fg:#e4ebe7; --muted:#93a39b; --line:#2a3732; --accent:#6db3d4;
+  --tmax:#ec7a62; --tmin:#6b9ee0; --tmean:#9aa8a1; --rain:#4fbccb; --snow:#a99ee6; --wind:#d6a54a; --gust:#e9c27a; --rad:#e9b23e; --et0:#7cbb64;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111816; --panel:#18211e; --fg:#e4ebe7; --muted:#93a39b; --line:#2a3732; --accent:#6db3d4;
+  --tmax:#ec7a62; --tmin:#6b9ee0; --tmean:#9aa8a1; --rain:#4fbccb; --snow:#a99ee6; --wind:#d6a54a; --gust:#e9c27a; --rad:#e9b23e; --et0:#7cbb64;
+  color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--display);display:flex;flex-direction:column}
+header{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:19px;font-weight:700;margin:0;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted);font-size:13px}
+.app{flex:1;display:grid;grid-template-columns:minmax(320px,44%) 1fr;min-height:0}
+#map{height:100%;min-height:360px;border-right:1px solid var(--line)}
+.panel{overflow-y:auto;padding:18px 20px 40px;display:flex;flex-direction:column;gap:18px;min-width:0}
+.loc{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline}
+.loc .coords{font:500 17px var(--mono)}
+.loc .meta{color:var(--muted);font-size:13px;font-family:var(--mono)}
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 12px;align-items:end;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+label{display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+input,select,button{font:14px var(--display);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;min-width:0}
+input[type=number],input[type=date]{font-family:var(--mono);font-size:13px}
+button{cursor:pointer;font-weight:600}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.presets{display:flex;gap:6px;flex-wrap:wrap;grid-column:1/-1}
+.presets button{font-weight:500;font-size:13px;padding:5px 10px}
+.presets button.on{border-color:var(--accent);color:var(--accent)}
+.status{font-size:13px;color:var(--muted);min-height:20px}
+.status.err{color:var(--tmax)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.tile{background:var(--panel);padding:11px 13px;display:flex;flex-direction:column;gap:2px}
+.tile .k{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tile .v{font:500 20px var(--mono);font-variant-numeric:tabular-nums}
+.tile .s{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.chart{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px 8px}
+.chart h2{font-size:14px;font-weight:600;margin:0 0 6px;display:flex;justify-content:space-between;gap:8px}
+.chart h2 span{font-weight:400;color:var(--muted);font-family:var(--mono);font-size:12px}
+.cv{position:relative;height:240px}
+footer.note{font-size:12px;color:var(--muted)}
+footer.note a{color:var(--accent)}
+.leaflet-container{font-family:var(--display);background:var(--bg)}
+@media (max-width:820px){
+  .app{grid-template-columns:1fr}
+  #map{height:52vh;border-right:0;border-bottom:1px solid var(--line)}
+  .panel{overflow:visible;padding:16px}
+  body{display:block}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Καιρικό Αρχείο Γρεβενών</h1>
+  <p>Πάτησε σε οποιοδήποτε σημείο του χάρτη για ιστορικά δεδομένα καιρού (ERA5 / Open-Meteo, από το 1940).</p>
+</header>
+<div class="app">
+  <div id="map" aria-label="Χάρτης"></div>
+  <section class="panel">
+    <div class="loc">
+      <div class="coords" id="coords">—</div>
+      <div class="meta" id="meta"></div>
+    </div>
+
+    <div class="controls">
+      <label for="lat">Γεωγρ. πλάτος<input id="lat" type="number" step="0.0001" min="-90" max="90"></label>
+      <label for="lon">Γεωγρ. μήκος<input id="lon" type="number" step="0.0001" min="-180" max="180"></label>
+      <label for="start">Από<input id="start" type="date" min="1940-01-01"></label>
+      <label for="end">Έως<input id="end" type="date" min="1940-01-01"></label>
+      <label for="model">Μοντέλο
+        <select id="model">
+          <option value="best_match">Αυτόματο (best match)</option>
+          <option value="era5_land">ERA5-Land (~9 km)</option>
+          <option value="era5">ERA5 (~31 km)</option>
+          <option value="ecmwf_ifs">ECMWF IFS (~9 km, από 2017)</option>
+        </select>
+      </label>
+      <label for="agg">Ομαδοποίηση
+        <select id="agg">
+          <option value="auto">Αυτόματη</option>
+          <option value="day">Ημερήσια</option>
+          <option value="month">Μηνιαία</option>
+          <option value="year">Ετήσια</option>
+        </select>
+      </label>
+      <button class="primary" id="go">Φόρτωση δεδομένων</button>
+      <button id="csv" disabled>Εξαγωγή CSV</button>
+      <div class="presets" id="presets">
+        <button data-d="30">30 ημέρες</button>
+        <button data-d="365" class="on">1 έτος</button>
+        <button data-d="1826">5 έτη</button>
+        <button data-d="3652">10 έτη</button>
+        <button data-d="10957">30 έτη</button>
+      </div>
+    </div>
+
+    <div class="status" id="status" role="status"></div>
+
+    <div class="tiles" id="tiles"></div>
+
+    <div class="chart"><h2>Θερμοκρασία <span id="u-t">°C</span></h2><div class="cv"><canvas id="c-temp"></canvas></div></div>
+    <div class="chart"><h2>Υετός <span id="u-p">mm · χιόνι cm</span></h2><div class="cv"><canvas id="c-prec"></canvas></div></div>
+    <div class="chart"><h2>Άνεμος <span>km/h, στα 10 m</span></h2><div class="cv"><canvas id="c-wind"></canvas></div></div>
+    <div class="chart"><h2>Ακτινοβολία &amp; εξατμισοδιαπνοή <span>MJ/m² · ET₀ mm</span></h2><div class="cv"><canvas id="c-rad"></canvas></div></div>
+
+    <footer class="note">
+      Πηγή: <a href="https://open-meteo.com/en/docs/historical-weather-api" target="_blank" rel="noopener">Open-Meteo Historical Weather API</a> (CC BY 4.0), βασισμένο σε ERA5 του Copernicus/ECMWF.
+      Τα δεδομένα είναι reanalysis (μοντέλο αφομοίωσης παρατηρήσεων), όχι μέτρηση σταθμού. Σε ορεινό ανάγλυφο εξομαλύνουν ακραίες τιμές.
+      Τα πιο πρόσφατα ~5 ημέρες ενδέχεται να λείπουν.
+    </footer>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(() => {
+const GREVENA = [40.084, 21.427];
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const iso = d => d.toISOString().slice(0,10);
+const fmt = (v, d=1) => v == null || isNaN(v) ? '—' : v.toLocaleString('el-GR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtDate = s => { if(!s) return ''; const p=s.split('-'); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:p.length===2?`${p[1]}/${p[0]}`:s; };
+
+const DAILY = ['temperature_2m_max','temperature_2m_min','temperature_2m_mean','precipitation_sum','rain_sum','snowfall_sum',
+  'precipitation_hours','wind_speed_10m_max','wind_gusts_10m_max','wind_direction_10m_dominant','shortwave_radiation_sum','et0_fao_evapotranspiration','sunshine_duration'];
+
+let point = null, data = null, ctrl = null, charts = {};
+
+/* ---------- Χάρτης ---------- */
+const map = L.map('map', {zoomControl:true}).setView(GREVENA, 10);
+const base = {
+  'Τοπογραφικός (OpenTopoMap)': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {maxZoom:17, attribution:'© OpenStreetMap, SRTM · © OpenTopoMap (CC-BY-SA)'}),
+  'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© OpenStreetMap contributors'}),
+  'Δορυφορικός (Esri)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19, attribution:'Tiles © Esri'})
+};
+base['Τοπογραφικός (OpenTopoMap)'].addTo(map);
+L.control.layers(base, null, {position:'topright'}).addTo(map);
+L.control.scale({imperial:false}).addTo(map);
+let marker = null;
+map.on('click', e => setPoint(e.latlng.lat, e.latlng.lng, true));
+
+function setPoint(lat, lon, load){
+  lat = +(+lat).toFixed(4); lon = +(+lon).toFixed(4);
+  point = {lat, lon};
+  $('lat').value = lat; $('lon').value = lon;
+  $('coords').textContent = `${lat.toFixed(4)}° Β, ${lon.toFixed(4)}° Α`;
+  const style = {radius:8, color:css('--panel'), weight:2, fillColor:css('--tmax'), fillOpacity:1};
+  if(marker) marker.setLatLng([lat,lon]).setStyle(style); else marker = L.circleMarker([lat,lon], style).addTo(map);
+  if(load) loadData();
+}
+
+/* ---------- Ημερομηνίες ---------- */
+const maxEnd = new Date(Date.now() - 5*864e5);
+$('end').max = $('start').max = iso(maxEnd);
+function preset(days){
+  $('end').value = iso(maxEnd);
+  $('start').value = iso(new Date(maxEnd - (days-1)*864e5));
+  document.querySelectorAll('#presets button').forEach(b => b.classList.toggle('on', +b.dataset.d === days));
+}
+$('presets').addEventListener('click', e => { const b=e.target.closest('button'); if(!b) return; preset(+b.dataset.d); if(point) loadData(); });
+['start','end'].forEach(id => $(id).addEventListener('change', () => document.querySelectorAll('#presets button').forEach(b=>b.classList.remove('on'))));
+$('go').addEventListener('click', () => {
+  const lat = parseFloat($('lat').value), lon = parseFloat($('lon').value);
+  if(isNaN(lat)||isNaN(lon)) return status('Δώσε έγκυρες συντεταγμένες.', true);
+  setPoint(lat, lon, false); map.panTo([lat,lon]); loadData();
+});
+$('model').addEventListener('change', () => point && loadData());
+$('agg').addEventListener('change', () => data && render());
+
+function status(msg, err){ const s=$('status'); s.textContent = msg; s.classList.toggle('err', !!err); }
+
+/* ---------- Λήψη ---------- */
+async function loadData(){
+  if(!point) return;
+  const start = $('start').value, end = $('end').value;
+  if(!start || !end || start > end) return status('Το διάστημα ημερομηνιών δεν είναι έγκυρο.', true);
+  if(ctrl) ctrl.abort();
+  ctrl = new AbortController();
+  const u = new URL('https://archive-api.open-meteo.com/v1/archive');
+  u.search = new URLSearchParams({latitude:point.lat, longitude:point.lon, start_date:start, end_date:end,
+    daily:DAILY.join(','), timezone:'Europe/Athens'});
+  const m = $('model').value; if(m !== 'best_match') u.searchParams.set('models', m);
+  status('Φόρτωση δεδομένων…'); $('go').disabled = true;
+  try{
+    const r = await fetch(u, {signal:ctrl.signal});
+    const j = await r.json();
+    if(!r.ok || j.error) throw new Error(j.reason || `HTTP ${r.status}`);
+    // κόψε τις τελευταίες κενές ημέρες
+    let n = j.daily.time.length;
+    while(n > 0 && j.daily.temperature_2m_max[n-1] == null) n--;
+    const d = {}; for(const k in j.daily) d[k] = j.daily[k].slice(0, n);
+    data = {daily:d, elevation:j.elevation, lat:j.latitude, lon:j.longitude, model:m, start, end};
+    $('meta').textContent = `υψόμετρο κελιού ${fmt(j.elevation,0)} m · κέντρο κελιού ${j.latitude.toFixed(3)}, ${j.longitude.toFixed(3)}`;
+    status(`${n.toLocaleString('el-GR')} ημέρες, ${fmtDate(d.time[0])} – ${fmtDate(d.time[n-1])}`);
+    $('csv').disabled = false;
+    render();
+  }catch(e){
+    if(e.name === 'AbortError') return;
+    status(`Δεν φορτώθηκαν δεδομένα: ${e.message}. Έλεγξε τη σύνδεση ή δοκίμασε μικρότερο διάστημα.`, true);
+  }finally{ $('go').disabled = false; }
+}
+
+/* ---------- Ομαδοποίηση ---------- */
+function aggregate(d, mode){
+  if(mode === 'day') return {labels:d.time, s:d};
+  const keyLen = mode === 'month' ? 7 : 4;
+  const groups = new Map();
+  d.time.forEach((t,i) => { const k=t.slice(0,keyLen); if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
+  const mean = (arr, idx) => { const v=idx.map(i=>arr[i]).filter(x=>x!=null); return v.length? v.reduce((a,b)=>a+b,0)/v.length : null; };
+  const sum  = (arr, idx) => { const v=idx.map(i=>arr[i]).filter(x=>x!=null); return v.length? v.reduce((a,b)=>a+b,0) : null; };
+  const max  = (arr, idx) => { const v=idx.map(i=>arr[i]).filter(x=>x!=null); return v.length? Math.max(...v) : null; };
+  const rule = {temperature_2m_max:mean, temperature_2m_min:mean, temperature_2m_mean:mean, precipitation_sum:sum, rain_sum:sum,
+    snowfall_sum:sum, precipitation_hours:sum, wind_speed_10m_max:mean, wind_gusts_10m_max:max, shortwave_radiation_sum:sum,
+    et0_fao_evapotranspiration:sum, sunshine_duration:sum};
+  const s = {}; for(const k in rule) s[k] = [];
+  for(const idx of groups.values()) for(const k in rule) s[k].push(d[k] ? rule[k](d[k], idx) : null);
+  return {labels:[...groups.keys()], s};
+}
+
+/* ---------- Απεικόνιση ---------- */
+function render(){
+  if(!data) return;
+  const d = data.daily, n = d.time.length;
+  let mode = $('agg').value;
+  if(mode === 'auto') mode = n > 3700 ? 'year' : n > 400 ? 'month' : 'day';
+  const {labels, s} = aggregate(d, mode);
+  const lab = labels.map(fmtDate);
+  const per = {day:'ημερήσια', month:'μηνιαία', year:'ετήσια'}[mode];
+
+  // Δείκτες (πάντα από τις ημερήσιες τιμές)
+  const vals = k => d[k].filter(v => v!=null);
+  const argOf = (k, fn) => { let bi=-1; d[k].forEach((v,i)=>{ if(v!=null && (bi<0 || fn(v, d[k][bi]))) bi=i; }); return bi; };
+  const iMax = argOf('temperature_2m_max', (a,b)=>a>b), iMin = argOf('temperature_2m_min', (a,b)=>a<b);
+  const iRain = argOf('precipitation_sum', (a,b)=>a>b), iGust = argOf('wind_gusts_10m_max', (a,b)=>a>b);
+  const tmean = vals('temperature_2m_mean'); const avgT = tmean.reduce((a,b)=>a+b,0)/tmean.length;
+  const years = n / 365.25;
+  const totP = vals('precipitation_sum').reduce((a,b)=>a+b,0);
+  const totS = vals('snowfall_sum').reduce((a,b)=>a+b,0);
+  const wet = vals('precipitation_sum').filter(v=>v>=1).length;
+  const frost = vals('temperature_2m_min').filter(v=>v<0).length;
+  const hot = vals('temperature_2m_max').filter(v=>v>=30).length;
+  const perY = years >= 1.5;
+  const tile = (k,v,sub) => `<div class="tile"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${sub||'&nbsp;'}</span></div>`;
+  $('tiles').innerHTML =
+    tile('Μέση θερμοκρασία', `${fmt(avgT)} °C`, `περίοδος ${fmt(years,1)} ετών`) +
+    tile('Μέγιστη', `${fmt(d.temperature_2m_max[iMax])} °C`, fmtDate(d.time[iMax])) +
+    tile('Ελάχιστη', `${fmt(d.temperature_2m_min[iMin])} °C`, fmtDate(d.time[iMin])) +
+    tile(perY ? 'Υετός / έτος' : 'Συνολικός υετός', `${fmt(perY ? totP/years : totP, 0)} mm`, `μέγ. ημέρας ${fmt(d.precipitation_sum[iRain])} mm`) +
+    tile(perY ? 'Χιόνι / έτος' : 'Χιονόπτωση', `${fmt(perY ? totS/years : totS, 0)} cm`, 'φρέσκο χιόνι') +
+    tile(perY ? 'Ημέρες βροχής / έτος' : 'Ημέρες βροχής', fmt(perY ? wet/years : wet, 0), 'υετός ≥ 1 mm') +
+    tile(perY ? 'Ημέρες παγετού / έτος' : 'Ημέρες παγετού', fmt(perY ? frost/years : frost, 0), `ελάχ. < 0 °C · ≥30 °C: ${fmt(perY?hot/years:hot,0)}`) +
+    tile('Μέγ. ριπή ανέμου', `${fmt(d.wind_gusts_10m_max[iGust],0)} km/h`, fmtDate(d.time[iGust]));
+
+  $('u-t').textContent = `°C · ${per}`;
+  $('u-p').textContent = `mm · χιόνι cm · ${per === 'ημερήσια' ? 'ανά ημέρα' : 'αθροίσματα ' + (mode==='month'?'μήνα':'έτους')}`;
+
+  const C = {fg:css('--fg'), muted:css('--muted'), line:css('--line'), panel:css('--panel')};
+  Chart.defaults.color = C.muted; Chart.defaults.borderColor = C.line;
+  Chart.defaults.font.family = css('--display'); Chart.defaults.font.size = 12;
+  const pts = labels.length > 120 ? 0 : 2;
+  const line = (label, arr, color, extra={}) => ({type:'line', label, data:arr, borderColor:color, backgroundColor:color, borderWidth:1.6, pointRadius:pts, pointHoverRadius:4, tension:.25, spanGaps:true, ...extra});
+  const bar  = (label, arr, color, extra={}) => ({type:'bar', label, data:arr, backgroundColor:color, borderWidth:0, ...extra});
+  const alpha = (hex, a) => hex + Math.round(a*255).toString(16).padStart(2,'0');
+  const opts = (yTitle, y2) => ({
+    responsive:true, maintainAspectRatio:false, animation:false, interaction:{mode:'index', intersect:false},
+    plugins:{legend:{position:'bottom', labels:{boxWidth:10, boxHeight:10, usePointStyle:true, padding:14}},
+      tooltip:{backgroundColor:C.panel, titleColor:C.fg, bodyColor:C.fg, borderColor:C.line, borderWidth:1,
+        callbacks:{label:c => `${c.dataset.label}: ${c.parsed.y==null?'—':c.parsed.y.toLocaleString('el-GR',{maximumFractionDigits:1})}`}}},
+    scales:{x:{grid:{display:false}, ticks:{maxTicksLimit:10, maxRotation:0, autoSkip:true}},
+      y:{title:{display:true, text:yTitle}, grid:{color:C.line}},
+      ...(y2 ? {y2:{position:'right', title:{display:true, text:y2}, grid:{display:false}}} : {})}
+  });
+  const draw = (id, datasets, o) => { charts[id]?.destroy(); charts[id] = new Chart($(id), {data:{labels:lab, datasets}, options:o}); };
+
+  const tmax=css('--tmax'), tmin=css('--tmin');
+  draw('c-temp', [
+    line(mode==='day'?'Μέγιστη':'Μ.ό. μέγιστων', s.temperature_2m_max, tmax, {fill:'+2', backgroundColor:alpha(css('--tmean'),.12)}),
+    line('Μέση', s.temperature_2m_mean, css('--tmean'), {borderDash:[4,3]}),
+    line(mode==='day'?'Ελάχιστη':'Μ.ό. ελάχιστων', s.temperature_2m_min, tmin)
+  ], opts('°C'));
+  draw('c-prec', [
+    bar('Βροχή', s.rain_sum, css('--rain'), {stack:'p'}),
+    bar('Χιόνι (cm)', s.snowfall_sum, alpha(css('--snow'),.85), {yAxisID:'y2'})
+  ], (()=>{ const o = opts('mm','cm χιονιού'); o.scales.x.stacked = true; return o; })());
+  draw('c-wind', [
+    line(mode==='day'?'Μέγ. ταχύτητα':'Μ.ό. μέγ. ταχύτητας', s.wind_speed_10m_max, css('--wind')),
+    line('Μέγ. ριπή', s.wind_gusts_10m_max, css('--gust'), {borderDash:[4,3]})
+  ], opts('km/h'));
+  draw('c-rad', [
+    bar('Ηλιακή ακτινοβολία', s.shortwave_radiation_sum, alpha(css('--rad'),.75)),
+    line('ET₀ (FAO-56)', s.et0_fao_evapotranspiration, css('--et0'), {yAxisID:'y2', borderWidth:2})
+  ], opts('MJ/m²','mm'));
+}
+
+/* ---------- CSV ---------- */
+$('csv').addEventListener('click', () => {
+  if(!data) return;
+  const d = data.daily, keys = Object.keys(d);
+  const rows = [keys.join(',')].concat(d.time.map((_,i) => keys.map(k => d[k][i] ?? '').join(',')));
+  const head = `# lat=${data.lat},lon=${data.lon},elevation=${data.elevation},model=${data.model},source=Open-Meteo archive API\n`;
+  const blob = new Blob([head + rows.join('\n')], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `kairos_${data.lat.toFixed(3)}_${data.lon.toFixed(3)}_${data.start}_${data.end}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { render(); point && setPoint(point.lat, point.lon, false); });
+
+/* ---------- Εκκίνηση: πόλη των Γρεβενών ---------- */
+preset(365);
+setPoint(GREVENA[0], GREVENA[1], true);
+})();
+</script>
+</body>
+</html>
